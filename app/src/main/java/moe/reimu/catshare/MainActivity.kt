@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -46,7 +45,6 @@ import org.uwuaosp.compose.settingslib.SettingsCategory
 import org.uwuaosp.compose.settingslib.SettingsScaffold
 import org.uwuaosp.compose.settingslib.SettingsToolbarActionButton
 import org.uwuaosp.compose.settingslib.SwitchPreferenceRow
-import rikka.shizuku.Shizuku
 import java.util.ArrayList
 
 class MainActivity : ComponentActivity() {
@@ -149,44 +147,6 @@ fun MainActivityContent() {
         }
     }
 
-    val localMacAddressGranted = remember {
-        context.checkSelfPermission("android.permission.LOCAL_MAC_ADDRESS") == PackageManager.PERMISSION_GRANTED
-    }
-
-    var shizukuGranted by remember {
-        mutableStateOf(false)
-    }
-
-    var shizukuAvailable by remember {
-        mutableStateOf(false)
-    }
-
-    DisposableEffect(Unit) {
-        val permissionListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
-            Log.d(TAG, "Shizuku grant result: $grantResult")
-            shizukuGranted = grantResult == PackageManager.PERMISSION_GRANTED
-        }
-
-        val binderRecvListener = Shizuku.OnBinderReceivedListener {
-            shizukuAvailable = true
-            shizukuGranted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        }
-
-        val binderDeadReceiver = Shizuku.OnBinderDeadListener {
-            shizukuAvailable = false
-        }
-
-        Shizuku.addRequestPermissionResultListener(permissionListener)
-        Shizuku.addBinderReceivedListenerSticky(binderRecvListener)
-        Shizuku.addBinderDeadListener(binderDeadReceiver)
-
-        onDispose {
-            Shizuku.removeRequestPermissionResultListener(permissionListener)
-            Shizuku.removeBinderReceivedListener(binderRecvListener)
-            Shizuku.removeBinderDeadListener(binderDeadReceiver)
-        }
-    }
-
     val pickFilesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { pickedUris ->
@@ -241,45 +201,7 @@ fun MainActivityContent() {
             icon = Icons.Filled.Share,
             onClick = { pickFilesLauncher.launch(arrayOf("*/*")) },
             enabled = preferencesEnabled,
-            position = if (localMacAddressGranted) {
-                PreferencePosition.Bottom
-            } else {
-                PreferencePosition.Middle
-            },
+            position = PreferencePosition.Bottom,
         )
-
-        if (!localMacAddressGranted) {
-            PreferenceGroupSpacer()
-            PreferenceRow(
-                title = stringResource(
-                    if (shizukuAvailable) {
-                        if (shizukuGranted) {
-                            R.string.shizuku_available
-                        } else {
-                            R.string.shizuku_not_granted
-                        }
-                    } else {
-                        R.string.shizuku_unavailable
-                    }
-                ),
-                summary = stringResource(R.string.shizuku_desc),
-                icon = if (shizukuAvailable && shizukuGranted) {
-                    ImageVector.vectorResource(R.drawable.ic_done)
-                } else {
-                    ImageVector.vectorResource(R.drawable.ic_close)
-                },
-                enabled = preferencesEnabled,
-                onClick = {
-                    if (!shizukuGranted) {
-                        try {
-                            Shizuku.requestPermission(0)
-                        } catch (e: Throwable) {
-                            e.printStackTrace()
-                        }
-                    }
-                },
-                position = PreferencePosition.Bottom,
-            )
-        }
     }
 }

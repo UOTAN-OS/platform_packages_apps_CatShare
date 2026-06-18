@@ -39,7 +39,7 @@ import moe.reimu.catshare.utils.BleUtils
 import moe.reimu.catshare.utils.JsonWithUnknownKeys
 import moe.reimu.catshare.utils.NotificationUtils
 import moe.reimu.catshare.utils.ServiceState
-import moe.reimu.catshare.utils.ShizukuUtils
+import moe.reimu.catshare.utils.MacAddressUtils
 import moe.reimu.catshare.utils.TAG
 import moe.reimu.catshare.utils.checkBluetoothPermissions
 import moe.reimu.catshare.utils.registerInternalBroadcastReceiver
@@ -213,7 +213,7 @@ class GattServerService : Service() {
             return
         }
 
-        ShizukuUtils.getMacAddress(this, "p2p0") {
+        MacAddressUtils.getMacAddress(this, "p2p0") {
             if (it != null) {
                 updateMacAddress(it)
             }

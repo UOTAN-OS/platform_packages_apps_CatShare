@@ -7,14 +7,11 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
-import android.os.IBinder
 import android.os.ParcelUuid
 import android.provider.MediaStore
 import android.util.Log
@@ -60,7 +57,6 @@ import moe.reimu.catshare.ui.theme.CatShareTheme
 import moe.reimu.catshare.utils.BleUtils
 import moe.reimu.catshare.utils.DeviceUtils
 import moe.reimu.catshare.utils.NotificationUtils
-import moe.reimu.catshare.utils.ShizukuUtils
 import moe.reimu.catshare.utils.TAG
 import java.nio.ByteBuffer
 import kotlin.random.Random
@@ -117,8 +113,6 @@ class ShareActivity : ComponentActivity() {
         }
 
         Log.i(TAG, "Shared ${fileInfos.size} files")
-
-        ShizukuUtils.bindService()
 
         enableEdgeToEdge()
         setContent {
