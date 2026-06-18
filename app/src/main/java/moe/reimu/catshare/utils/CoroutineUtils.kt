@@ -4,7 +4,7 @@ import androidx.annotation.StringRes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.time.withTimeout
+import kotlinx.coroutines.withTimeout
 import moe.reimu.catshare.exceptions.ExceptionWithMessage
 import java.time.Duration
 import java.util.concurrent.TimeoutException
@@ -17,7 +17,7 @@ suspend fun <T> withTimeoutReason(
     block: suspend CoroutineScope.() -> T
 ): T {
     try {
-        return withTimeout(duration, block)
+        return withTimeout(duration.toMillis(), block)
     } catch (e: TimeoutCancellationException) {
         throw ExceptionWithMessage(
             "Timed out after ${duration.toMillis()} ms: $reason",
