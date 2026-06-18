@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -15,8 +14,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContract
-import androidx.activity.result.launch
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -189,7 +187,9 @@ fun MainActivityContent() {
         }
     }
 
-    val pickFilesLauncher = rememberLauncherForActivityResult(ChooseFilesContract()) { pickedUris ->
+    val pickFilesLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { pickedUris ->
         if (pickedUris.isNotEmpty()) {
             val intent = Intent(context, ShareActivity::class.java)
                 .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(pickedUris))
@@ -239,7 +239,7 @@ fun MainActivityContent() {
             title = stringResource(R.string.send),
             summary = stringResource(R.string.send_desc),
             icon = Icons.Filled.Share,
-            onClick = { pickFilesLauncher.launch() },
+            onClick = { pickFilesLauncher.launch(arrayOf("*/*")) },
             enabled = preferencesEnabled,
             position = if (localMacAddressGranted) {
                 PreferencePosition.Bottom
@@ -279,44 +279,7 @@ fun MainActivityContent() {
                     }
                 },
                 position = PreferencePosition.Bottom,
-    )
-}
-
-class ChooseFilesContract : ActivityResultContract<Void?, List<Uri>>() {
-    override fun createIntent(context: Context, input: Void?): Intent {
-        val cf = Intent(Intent.ACTION_GET_CONTENT)
-            .setType("*/*")
-            .addCategory(Intent.CATEGORY_OPENABLE)
-            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-        return Intent.createChooser(cf, context.getString(R.string.choose_files))
-    }
-
-    override fun getSynchronousResult(
-        context: Context,
-        input: Void?
-    ): SynchronousResult<List<Uri>>? =
-        null
-
-    override fun parseResult(resultCode: Int, intent: Intent?): List<Uri> {
-        if (intent == null) {
-            return emptyList()
+            )
         }
-
-        val ret = mutableListOf<Uri>()
-
-        val clipData = intent.clipData
-        if (clipData != null) {
-            for (i in 0..<clipData.itemCount) {
-                clipData.getItemAt(i).uri?.let {
-                    ret.add(it)
-                }
-            }
-        } else {
-            intent.data?.let {
-                ret.add(it)
-            }
-        }
-
-        return ret
     }
 }
