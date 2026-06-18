@@ -17,33 +17,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.launch
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -52,11 +36,18 @@ import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import moe.reimu.catshare.services.GattServerService
-import moe.reimu.catshare.ui.DefaultCard
 import moe.reimu.catshare.ui.theme.CatShareTheme
 import moe.reimu.catshare.utils.ServiceState
 import moe.reimu.catshare.utils.TAG
 import moe.reimu.catshare.utils.registerInternalBroadcastReceiver
+import org.uwuaosp.compose.settingslib.MainSwitchPreference
+import org.uwuaosp.compose.settingslib.PreferenceGroupSpacer
+import org.uwuaosp.compose.settingslib.PreferencePosition
+import org.uwuaosp.compose.settingslib.PreferenceRow
+import org.uwuaosp.compose.settingslib.SettingsCategory
+import org.uwuaosp.compose.settingslib.SettingsScaffold
+import org.uwuaosp.compose.settingslib.SettingsToolbarActionButton
+import org.uwuaosp.compose.settingslib.SwitchPreferenceRow
 import rikka.shizuku.Shizuku
 import java.util.ArrayList
 
@@ -134,11 +125,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainActivityContent() {
+    var preferencesEnabled by remember { mutableStateOf(true) }
     var checked by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
 
     val context = LocalContext.current
     DisposableEffect(context) {
@@ -207,122 +197,90 @@ fun MainActivityContent() {
         }
     }
 
-    Scaffold(topBar = {
-        TopAppBar(title = { Text(text = stringResource(R.string.app_name)) }, actions = {
-            IconButton(onClick = {
-                context.startActivity(Intent(context, SettingsActivity::class.java))
-            }) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = stringResource(R.string.title_activity_settings)
-                )
-            }
-        })
-    }) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.padding(innerPadding),
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-        ) {
-            item {
-                DefaultCard(onClick = {
-                    pickFilesLauncher.launch()
-                }) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        MyIcon(Icons.Filled.Share)
-                        Column {
-                            Text(
-                                text = stringResource(R.string.send),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                text = stringResource(R.string.send_desc),
-                            )
-                        }
-                    }
+    SettingsScaffold(
+        title = stringResource(R.string.app_name),
+        showBackButton = false,
+        actions = {
+            SettingsToolbarActionButton(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = stringResource(R.string.title_activity_settings),
+                onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) },
+            )
+        },
+    ) {
+        MainSwitchPreference(
+            checked = preferencesEnabled,
+            onCheckedChange = {
+                preferencesEnabled = it
+                if (!it) {
+                    GattServerService.stop(context)
                 }
+            },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsCategory(title = stringResource(R.string.catshare_category_transfer))
+        SwitchPreferenceRow(
+            title = stringResource(R.string.discoverable),
+            summary = stringResource(R.string.discoverable_desc),
+            checked = checked,
+            enabled = preferencesEnabled,
+            icon = ImageVector.vectorResource(R.drawable.ic_feature_search),
+            onCheckedChange = {
+                if (it) {
+                    GattServerService.start(context)
+                } else {
+                    GattServerService.stop(context)
+                }
+            },
+            position = PreferencePosition.Top,
+        )
+        PreferenceGroupSpacer()
+        PreferenceRow(
+            title = stringResource(R.string.send),
+            summary = stringResource(R.string.send_desc),
+            icon = Icons.Filled.Share,
+            onClick = { pickFilesLauncher.launch() },
+            enabled = preferencesEnabled,
+            position = if (localMacAddressGranted) {
+                PreferencePosition.Bottom
+            } else {
+                PreferencePosition.Middle
+            },
+        )
 
-            }
-            item {
-                DefaultCard {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        MyIcon(ImageVector.vectorResource(R.drawable.ic_bluetooth_searching))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.discoverable),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                text = stringResource(R.string.discoverable_desc),
-                            )
+        if (!localMacAddressGranted) {
+            PreferenceGroupSpacer()
+            PreferenceRow(
+                title = stringResource(
+                    if (shizukuAvailable) {
+                        if (shizukuGranted) {
+                            R.string.shizuku_available
+                        } else {
+                            R.string.shizuku_not_granted
                         }
-                        Switch(checked = checked, onCheckedChange = {
-                            if (it) {
-                                GattServerService.start(context)
-                            } else {
-                                GattServerService.stop(context)
-                            }
-                        }, modifier = Modifier.padding(start = 8.dp))
+                    } else {
+                        R.string.shizuku_unavailable
                     }
-                }
-            }
-
-            if (!localMacAddressGranted) {
-                item {
-                    DefaultCard(onClick = {
-                        if (!shizukuGranted) {
-                            try {
-                                Shizuku.requestPermission(0)
-                            } catch (e: Throwable) {
-                                e.printStackTrace()
-                            }
-                        }
-                    }) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            MyIcon(
-                                if (shizukuAvailable && shizukuGranted) {
-                                    ImageVector.vectorResource(R.drawable.ic_done)
-                                } else {
-                                    ImageVector.vectorResource(R.drawable.ic_close)
-                                }
-                            )
-                            Column {
-                                Text(
-                                    text = stringResource(
-                                        if (shizukuAvailable) {
-                                            if (shizukuGranted) {
-                                                R.string.shizuku_available
-                                            } else {
-                                                R.string.shizuku_not_granted
-                                            }
-                                        } else {
-                                            R.string.shizuku_unavailable
-                                        }
-                                    ),
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Text(
-                                    text = stringResource(R.string.shizuku_desc),
-                                )
-                            }
+                ),
+                summary = stringResource(R.string.shizuku_desc),
+                icon = if (shizukuAvailable && shizukuGranted) {
+                    ImageVector.vectorResource(R.drawable.ic_done)
+                } else {
+                    ImageVector.vectorResource(R.drawable.ic_close)
+                },
+                enabled = preferencesEnabled,
+                onClick = {
+                    if (!shizukuGranted) {
+                        try {
+                            Shizuku.requestPermission(0)
+                        } catch (e: Throwable) {
+                            e.printStackTrace()
                         }
                     }
-                }
-            }
-        }
-    }
+                },
+                position = PreferencePosition.Bottom,
+    )
 }
-
 
 class ChooseFilesContract : ActivityResultContract<Void?, List<Uri>>() {
     override fun createIntent(context: Context, input: Void?): Intent {
@@ -361,15 +319,4 @@ class ChooseFilesContract : ActivityResultContract<Void?, List<Uri>>() {
 
         return ret
     }
-}
-
-@Composable
-fun MyIcon(imageVector: ImageVector) {
-    Icon(
-        imageVector = imageVector,
-        contentDescription = null,
-        modifier = Modifier
-            .size(48.dp)
-            .padding(end = 16.dp),
-    )
 }

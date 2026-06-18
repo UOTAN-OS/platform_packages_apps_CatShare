@@ -46,13 +46,20 @@
     <string name="choose_files">选择文件</string>
     <string name="title_activity_settings">设置</string>
     <string name="device_name">设备名称</string>
+    <string name="edit_device_name">编辑设备名称</string>
     <string name="device_name_default_value">我的手机</string>
+    <string name="device_name_empty_error">设备名称不能为空</string>
+    <string name="ok">确定</string>
+    <string name="cancel">取消</string>
     <string name="log_capture_failed">日志获取失败</string>
     <string name="capture_logs">捕获日志</string>
     <string name="capture_logs_desc">捕获调试日志以排查问题</string>
     <string name="expand_for_details">展开此通知以查看详细信息</string>
     <string name="verbose_name">显示详细错误信息</string>
     <string name="verbose_desc">在发送或接受失败时显示详细错误信息，用于排查问题</string>
+    <string name="catshare_category_transfer">传输</string>
+    <string name="catshare_category_device">设备</string>
+    <string name="catshare_category_debug">调试</string>
     <string name="error_p2p_failed">点对点连接建立失败</string>
     <string name="error_bt_failed">蓝牙通信失败</string>
     <string name="err_recv_req_timeout">等待发送请求超时</string>
@@ -64,4 +71,5 @@
     <string name="cancelled_by_user_remote">传输已被对端设备取消</string>
     <string name="wifi_disabled">WiFi 已关闭或不可用</string>
     <string name="auto_accept_name">自动接收</string>
+    <string name="auto_accept_desc">收到传输请求时不再询问，直接接受</string>
 </resources>
