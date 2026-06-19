@@ -55,6 +55,7 @@ android_app {
         "kotlinx_coroutines",
         "kotlinx_serialization_core",
         "kotlinx_serialization_json",
+        "uwuComposeSettingsLib",
     ],
 
     defaults: ["catshare_external_jar_defaults"],
