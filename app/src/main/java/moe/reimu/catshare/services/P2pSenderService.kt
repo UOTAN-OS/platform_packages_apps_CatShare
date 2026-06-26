@@ -23,7 +23,9 @@ import androidx.core.app.NotificationManagerCompat
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.network.tls.certificates.buildKeyStore
+import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.application.serverConfig
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.engine.sslConnector
 import io.ktor.server.netty.Netty
@@ -35,6 +37,7 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import io.ktor.util.AttributeKey
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -81,6 +84,176 @@ import java.util.concurrent.TimeoutException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.random.Random
+
+private const val ACTION_VERSION_NEGOTIATION = "versionNegotiation"
+
+private val SENDER_SERVER_CONTEXT = AttributeKey<SenderServerContext>("SenderServerContext")
+
+private data class SenderServerContext(
+    val service: P2pSenderService,
+    val task: TaskInfo,
+    val taskObj: JSONObject,
+    val taskIdStr: String,
+    val sharedTextContent: String?,
+    val totalSize: Long,
+    val websocketConnectFuture: CompletableDeferred<Unit>,
+    val handshakeCompleteFuture: CompletableDeferred<Unit>,
+    val transferStartFuture: CompletableDeferred<Unit>,
+    val statusFuture: CompletableDeferred<Pair<Int, String>>,
+    val transferCompleteFuture: CompletableDeferred<Unit>,
+    val wsCloseFuture: CompletableDeferred<Unit>,
+)
+
+object SenderServerModule {
+    fun install(application: Application) = with(application) {
+        val context = attributes[SENDER_SERVER_CONTEXT]
+
+        install(WebSockets)
+
+        routing {
+            webSocket("/websocket") {
+                Log.i(TAG, "Got WS request from ${call.request.local.remoteAddress}")
+                context.websocketConnectFuture.complete(Unit)
+
+                val versionNegotiationFuture = CompletableDeferred<Unit>()
+
+                launch {
+                    try {
+                        while (true) {
+                            val rawMessage = incoming.receive() as? Frame.Text
+                                ?: throw IllegalArgumentException("Invalid frame type")
+                            val message = WebSocketMessage.fromText(rawMessage.readText())
+                                ?: throw IllegalArgumentException("Failed to parse message")
+                            Log.d(P2pSenderService.TAG, "Incoming message: $message")
+
+                            when (message.type) {
+                                "action" -> {
+                                    if (message.name.contentEquals("status")) {
+                                        val payload = message.payload ?: continue
+                                        context.statusFuture.complete(
+                                            Pair(
+                                                payload.optInt("type"),
+                                                payload.optString("reason")
+                                            )
+                                        )
+                                    }
+
+                                    val ackMsg = WebSocketMessage(
+                                        "ack", message.id, message.name, null
+                                    )
+                                    send(Frame.Text(ackMsg.toText()))
+                                }
+
+                                "ack" -> {
+                                    val isVn = message.name.contentEquals(
+                                        ACTION_VERSION_NEGOTIATION, true
+                                    )
+                                    if (isVn) {
+                                        versionNegotiationFuture.complete(Unit)
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "WebSocket failed", e)
+                        throw e
+                    } finally {
+                        outgoing.close()
+                    }
+                }
+
+                send(
+                    Frame.Text(
+                        WebSocketMessage(
+                            "action",
+                            0,
+                            "versionNegotiation",
+                            JSONObject()
+                                .put("version", 1)
+                                .put("versions", listOf(1))
+                        ).toText()
+                    )
+                )
+                versionNegotiationFuture.await()
+                send(
+                    Frame.Text(
+                        WebSocketMessage(
+                            "action", 1, "sendRequest", context.taskObj
+                        ).toText()
+                    )
+                )
+                context.handshakeCompleteFuture.complete(Unit)
+
+                context.wsCloseFuture.await()
+            }
+
+            get("/download") {
+                Log.i(TAG, "Got download request from ${call.request.local.remoteAddress}")
+                context.transferStartFuture.complete(Unit)
+
+                if (call.request.queryParameters["taskId"] != context.taskIdStr) {
+                    call.respondText(
+                        "Task ID not found",
+                        ContentType.Text.Plain,
+                        HttpStatusCode.NotFound
+                    )
+                    return@get
+                }
+
+                var processedSize = 0L
+                var lastProgressUpdate = 0L
+
+                call.respondOutputStream(ContentType.Application.Zip, HttpStatusCode.OK) {
+                    val cr = context.service.contentResolver
+                    ZipOutputStream(this).use { zo ->
+                        if (context.sharedTextContent != null) {
+                            zo.putNextEntry(ZipEntry("0/sharedText.txt"))
+                            zo.write(context.sharedTextContent.toByteArray(Charsets.UTF_8))
+                            zo.closeEntry()
+                            return@use
+                        }
+
+                        for ((i, rf) in context.task.files.withIndex()) {
+                            cr.openInputStream(rf.uri)!!.use { ist ->
+                                zo.putNextEntry(ZipEntry("$i/${rf.name}"))
+
+                                val buffer = ByteArray(1024 * 1024 * 4)
+                                while (true) {
+                                    val readLen = ist.read(buffer)
+                                    if (readLen == -1) {
+                                        break
+                                    }
+                                    zo.write(buffer, 0, readLen)
+                                    processedSize += readLen.toLong()
+
+                                    val now = System.nanoTime()
+                                    val elapsed = TimeUnit.SECONDS.convert(
+                                        now - lastProgressUpdate,
+                                        TimeUnit.NANOSECONDS
+                                    )
+                                    if (elapsed > 1) {
+                                        context.service.updateNotification(
+                                            context.service.createProgressNotification(
+                                                context.task.id,
+                                                context.task.device.name,
+                                                context.totalSize,
+                                                processedSize
+                                            )
+                                        )
+                                        lastProgressUpdate = now
+                                    }
+                                }
+
+                                zo.closeEntry()
+                            }
+                        }
+                    }
+                    context.transferCompleteFuture.complete(Unit)
+                }
+            }
+        }
+    }
+}
 
 class P2pSenderService : BaseP2pService() {
     private val binder = LocalBinder()
@@ -197,14 +370,34 @@ class P2pSenderService : BaseP2pService() {
         val transferCompleteFuture = CompletableDeferred<Unit>()
         val wsCloseFuture = CompletableDeferred<Unit>()
 
-        val httpServer = embeddedServer(Netty, configure = {
-            val keyStore = buildKeyStore {
-                certificate("sampleAlias") {
-                    password = "foobar"
-                    domains = listOf("127.0.0.1", "0.0.0.0", "localhost")
-                }
+        val keyStore = buildKeyStore {
+            certificate("sampleAlias") {
+                password = "foobar"
+                domains = listOf("127.0.0.1", "0.0.0.0", "localhost")
             }
+        }
 
+        val serverContext = SenderServerContext(
+            service = this@P2pSenderService,
+            task = task,
+            taskObj = taskObj,
+            taskIdStr = taskIdStr,
+            sharedTextContent = sharedTextContent,
+            totalSize = totalSize,
+            websocketConnectFuture = websocketConnectFuture,
+            handshakeCompleteFuture = handshakeCompleteFuture,
+            transferStartFuture = transferStartFuture,
+            statusFuture = statusFuture,
+            transferCompleteFuture = transferCompleteFuture,
+            wsCloseFuture = wsCloseFuture,
+        )
+        val serverConfig = serverConfig {
+            developmentMode = false
+            watchPaths = emptyList()
+            module(SenderServerModule::install)
+        }
+
+        val httpServer = embeddedServer(Netty, serverConfig, configure = {
             sslConnector(keyStore = keyStore,
                 keyAlias = "sampleAlias",
                 keyStorePassword = { "123456".toCharArray() },
@@ -213,154 +406,10 @@ class P2pSenderService : BaseP2pService() {
             }
 
             enableHttp2 = false
-        }) {
-            install(WebSockets)
-
-            routing {
-                webSocket("/websocket") {
-                    Log.i(TAG, "Got WS request from ${call.request.local.remoteAddress}")
-                    websocketConnectFuture.complete(Unit)
-
-                    val versionNegotiationFuture = CompletableDeferred<Unit>()
-
-                    launch {
-                        try {
-                            while (true) {
-                                val rawMessage = incoming.receive() as? Frame.Text
-                                    ?: throw IllegalArgumentException("Invalid frame type")
-                                val message = WebSocketMessage.fromText(rawMessage.readText())
-                                    ?: throw IllegalArgumentException("Failed to parse message")
-                                Log.d(P2pSenderService.TAG, "Incoming message: $message")
-
-                                when (message.type) {
-                                    "action" -> {
-                                        if (message.name.contentEquals("status")) {
-                                            val payload = message.payload ?: continue
-                                            statusFuture.complete(
-                                                Pair(
-                                                    payload.optInt("type"),
-                                                    payload.optString("reason")
-                                                )
-                                            )
-                                        }
-
-                                        val ackMsg = WebSocketMessage(
-                                            "ack", message.id, message.name, null
-                                        )
-                                        send(Frame.Text(ackMsg.toText()))
-                                    }
-
-                                    "ack" -> {
-                                        val isVn = message.name.contentEquals(
-                                            ACTION_VERSION_NEGOTIATION, true
-                                        )
-                                        if (isVn) {
-                                            versionNegotiationFuture.complete(Unit)
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (e: Throwable) {
-                            Log.e(TAG, "WebSocket failed", e)
-                            throw e
-                        } finally {
-                            outgoing.close()
-                        }
-                    }
-
-                    send(
-                        Frame.Text(
-                            WebSocketMessage(
-                                "action",
-                                0,
-                                "versionNegotiation",
-                                JSONObject()
-                                    .put("version", 1)
-                                    .put("versions", listOf(1))
-                            ).toText()
-                        )
-                    )
-                    versionNegotiationFuture.await()
-                    send(
-                        Frame.Text(
-                            WebSocketMessage(
-                                "action", 1, "sendRequest", taskObj
-                            ).toText()
-                        )
-                    )
-                    handshakeCompleteFuture.complete(Unit)
-
-                    wsCloseFuture.await()
-                }
-
-                get("/download") {
-                    Log.i(TAG, "Got download request from ${call.request.local.remoteAddress}")
-                    transferStartFuture.complete(Unit)
-
-                    if (call.request.queryParameters["taskId"] != taskIdStr) {
-                        call.respondText(
-                            "Task ID not found",
-                            ContentType.Text.Plain,
-                            HttpStatusCode.NotFound
-                        )
-                        return@get
-                    }
-
-                    var processedSize = 0L
-                    var lastProgressUpdate = 0L
-
-                    call.respondOutputStream(ContentType.Application.Zip, HttpStatusCode.OK) {
-                        val cr = contentResolver
-                        ZipOutputStream(this).use { zo ->
-                            if (sharedTextContent != null) {
-                                zo.putNextEntry(ZipEntry("0/sharedText.txt"))
-                                zo.write(sharedTextContent.toByteArray(Charsets.UTF_8))
-                                zo.closeEntry()
-                                return@use
-                            }
-
-                            for ((i, rf) in task.files.withIndex()) {
-                                cr.openInputStream(rf.uri)!!.use { ist ->
-                                    zo.putNextEntry(ZipEntry("$i/${rf.name}"))
-
-                                    val buffer = ByteArray(1024 * 1024 * 4)
-                                    while (true) {
-                                        val readLen = ist.read(buffer)
-                                        if (readLen == -1) {
-                                            break
-                                        }
-                                        zo.write(buffer, 0, readLen)
-                                        processedSize += readLen.toLong()
-
-                                        // Update progress if needed
-                                        val now = System.nanoTime()
-                                        val elapsed = TimeUnit.SECONDS.convert(
-                                            now - lastProgressUpdate, TimeUnit.NANOSECONDS
-                                        )
-                                        if (elapsed > 1) {
-                                            updateNotification(
-                                                createProgressNotification(
-                                                    task.id,
-                                                    task.device.name,
-                                                    totalSize,
-                                                    processedSize
-                                                )
-                                            )
-                                            lastProgressUpdate = now
-                                        }
-                                    }
-
-                                    zo.closeEntry()
-                                }
-                            }
-                        }
-                        transferCompleteFuture.complete(Unit)
-                    }
-                }
-            }
-        }
+        })
 
         try {
+            httpServer.application.attributes.put(SENDER_SERVER_CONTEXT, serverContext)
             httpServer.start()
             val serverPort = httpServer.engine.resolvedConnectors().first().port
             Log.d(TAG, "HTTP server listening on $serverPort")
@@ -395,12 +444,13 @@ class P2pSenderService : BaseP2pService() {
                 Log.d(TAG, "Advertised local MAC address: $p2pMac")
 
                 withTimeoutReason(
-                    Duration.ofSeconds(10),
+                    Duration.ofSeconds(30),
                     "BLE operations",
                     R.string.error_bt_failed
                 ) {
                     var gBleClient: ClientBleGatt? = null
                     try {
+                        Log.d(TAG, "Connecting to remote BLE GATT")
                         val bleClient = ClientBleGatt.connect(
                             this@P2pSenderService,
                             RealServerDevice(task.device.device),
@@ -408,7 +458,9 @@ class P2pSenderService : BaseP2pService() {
                         )
                         gBleClient = bleClient
 
+                        Log.d(TAG, "Requesting BLE MTU")
                         bleClient.requestMtu(512)
+                        Log.d(TAG, "Discovering BLE services")
                         val services = bleClient.discoverServices()
                         val p2pService = services.findService(BleUtils.SERVICE_UUID)
                             ?: throw IllegalStateException("BLE service not found")
@@ -417,6 +469,7 @@ class P2pSenderService : BaseP2pService() {
                                 ?: throw IllegalStateException("BLE device info char not found")
                         val p2pInfoChar = p2pService.findCharacteristic(BleUtils.CHAR_P2P_UUID)
                             ?: throw IllegalStateException("BLE P2P info char not found")
+                        Log.d(TAG, "Reading remote BLE device info")
                         val rdInfo: DeviceInfo =
                             JsonWithUnknownKeys.decodeFromString(deviceInfoChar.read().value.decodeToString())
                         Log.i(TAG, "Remote device: $rdInfo")
@@ -439,11 +492,13 @@ class P2pSenderService : BaseP2pService() {
                             catShare = BuildConfig.VERSION_CODE,
                         )
 
+                        Log.d(TAG, "Writing P2P info over BLE")
                         p2pInfoChar.write(
                             DataByteArray(
                                 Json.encodeToString(newP2pInfo).toByteArray()
                             )
                         )
+                        Log.d(TAG, "BLE P2P info write completed")
                     } finally {
                         gBleClient?.close()
                     }
@@ -593,7 +648,7 @@ class P2pSenderService : BaseP2pService() {
             .addAction(createCancelSendingAction(taskId))
             .setOngoing(true).build()
 
-    private fun createProgressNotification(
+    fun createProgressNotification(
         taskId: Int,
         targetName: String,
         totalSize: Long,
@@ -654,13 +709,11 @@ class P2pSenderService : BaseP2pService() {
             .build()
 
     @SuppressLint("MissingPermission")
-    private fun updateNotification(n: Notification) {
+    fun updateNotification(n: Notification) {
         notificationManager.notify(NotificationUtils.SENDER_FG_ID, n)
     }
 
     companion object {
-        private const val ACTION_VERSION_NEGOTIATION = "versionNegotiation"
-
         private const val ACTION_CANCEL_SENDING = "${BuildConfig.APPLICATION_ID}.CANCEL_SENDING"
 
         fun getIntent(context: Context, task: TaskInfo): Intent {
