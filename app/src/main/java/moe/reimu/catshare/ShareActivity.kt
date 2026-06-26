@@ -185,6 +185,7 @@ fun ShareActivityContent(files: List<FileInfo>) {
                             files = files
                         )
                         P2pSenderService.startTaskChecked(context, task)
+                        (context as? ComponentActivity)?.finish()
                     }) {
                         Row(
                             modifier = Modifier.padding(16.dp),

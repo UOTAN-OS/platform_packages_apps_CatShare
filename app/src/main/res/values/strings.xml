@@ -40,6 +40,7 @@
     <string name="app_busy_toast">Executing other sending/receiving tasks</string>
     <string name="scanning_desc">Scanning for recipients</string>
     <string name="choose_recipient">Choose recipients</string>
+    <string name="choose_device">Choose device</string>
     <string name="no_file_shared">No file shared or failed to read contents</string>
     <string name="unknown">Unknown</string>
     <string name="choose_files">Choose Files</string>
@@ -76,5 +77,10 @@
     <string name="receive_card_completed">Received</string>
     <string name="receive_card_failed">Couldn\'t receive</string>
     <string name="receive_card_multiple_files">%d files</string>
+    <string name="send_card_preparing">Preparing to send</string>
+    <string name="send_card_connecting">Connecting to recipient</string>
+    <string name="send_card_sending">Sending file</string>
+    <string name="send_card_completed">Sent</string>
+    <string name="send_card_failed">Couldn\'t send</string>
     <string name="close">Close</string>
 </resources>

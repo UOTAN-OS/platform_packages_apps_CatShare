@@ -63,6 +63,7 @@ import moe.reimu.catshare.models.P2pInfo
 import moe.reimu.catshare.models.TaskInfo
 import moe.reimu.catshare.models.WebSocketMessage
 import moe.reimu.catshare.utils.BleUtils
+import moe.reimu.catshare.utils.INTERNAL_BROADCAST_PERMISSION
 import moe.reimu.catshare.utils.DeviceUtils
 import moe.reimu.catshare.utils.JsonWithUnknownKeys
 import moe.reimu.catshare.utils.NotificationUtils
@@ -88,6 +89,9 @@ import kotlin.random.Random
 private const val ACTION_VERSION_NEGOTIATION = "versionNegotiation"
 
 private val SENDER_SERVER_CONTEXT = AttributeKey<SenderServerContext>("SenderServerContext")
+
+private val TaskInfo.totalSize: Long
+    get() = files.sumOf { it.size }
 
 private data class SenderServerContext(
     val service: P2pSenderService,
@@ -231,10 +235,19 @@ object SenderServerModule {
                                         now - lastProgressUpdate,
                                         TimeUnit.NANOSECONDS
                                     )
-                                    if (elapsed > 1) {
-                                        context.service.updateNotification(
-                                            context.service.createProgressNotification(
+                                        if (elapsed > 1) {
+                                            context.service.sendSendCardUpdate(
+                                                P2pSenderService.SEND_CARD_STATE_SENDING,
                                                 context.task.id,
+                                                context.task.device.name,
+                                                context.task.files.first().name,
+                                                context.task.files.size,
+                                                context.totalSize,
+                                                processedSize,
+                                            )
+                                            context.service.updateNotification(
+                                                context.service.createProgressNotification(
+                                                    context.task.id,
                                                 context.task.device.name,
                                                 context.totalSize,
                                                 processedSize
@@ -413,6 +426,7 @@ class P2pSenderService : BaseP2pService() {
             httpServer.start()
             val serverPort = httpServer.engine.resolvedConnectors().first().port
             Log.d(TAG, "HTTP server listening on $serverPort")
+            sendSendCardUpdate(SEND_CARD_STATE_CONNECTING, task)
 
             val groupInfo = p2pManager.requestGroupInfo(p2pChannel)
             if (groupInfo != null) {
@@ -442,6 +456,7 @@ class P2pSenderService : BaseP2pService() {
 
                 val p2pMac = MacAddressUtils.getMacAddress(this@P2pSenderService, "p2p0") ?: "02:00:00:00:00:00"
                 Log.d(TAG, "Advertised local MAC address: $p2pMac")
+                sendSendCardUpdate(SEND_CARD_STATE_CONNECTING, task)
 
                 withTimeoutReason(
                     Duration.ofSeconds(30),
@@ -520,6 +535,7 @@ class P2pSenderService : BaseP2pService() {
                         "Waiting for start transfer",
                         R.string.error_send_timeout_handshake
                     )
+                    sendSendCardUpdate(SEND_CARD_STATE_SENDING, task, processedSize = 0L)
                     transferCompleteFuture.await()
                     withTimeoutOrNull(5000L) {
                         statusFuture.await()
@@ -535,6 +551,11 @@ class P2pSenderService : BaseP2pService() {
                         throw CancelledByUserException(true)
                     }
                     if (status.first == 1) {
+                        sendSendCardUpdate(
+                            SEND_CARD_STATE_COMPLETED,
+                            task,
+                            processedSize = totalSize,
+                        )
                         delay(1000)
                         transferJob.cancel()
                         return@coroutineScope
@@ -574,6 +595,7 @@ class P2pSenderService : BaseP2pService() {
         @Suppress("DEPRECATION") val task = intent.getParcelableExtra<TaskInfo>("task") ?: return START_NOT_STICKY
         val job = CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             try {
+                sendSendCardUpdate(SEND_CARD_STATE_PREPARING, task)
                 startForeground(
                     NotificationUtils.SENDER_FG_ID,
                     createPendingNotification(task.id, task.device.name),
@@ -586,12 +608,14 @@ class P2pSenderService : BaseP2pService() {
                 )
             } catch (e: CancelledByUserException) {
                 Log.i(TAG, "Cancelled by user")
+                sendSendCardUpdate(SEND_CARD_STATE_FAILED, task)
                 notificationManager.notify(
                     Random.nextInt(),
                     createFailedNotification(task.device.name, e)
                 )
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to process task", e)
+                sendSendCardUpdate(SEND_CARD_STATE_FAILED, task)
                 notificationManager.notify(
                     Random.nextInt(),
                     createFailedNotification(task.device.name, e)
@@ -713,13 +737,70 @@ class P2pSenderService : BaseP2pService() {
         notificationManager.notify(NotificationUtils.SENDER_FG_ID, n)
     }
 
+    fun sendSendCardUpdate(
+        state: String,
+        task: TaskInfo,
+        processedSize: Long = 0L,
+    ) {
+        sendSendCardUpdate(
+            state,
+            task.id,
+            task.device.name,
+            task.files.first().name,
+            task.files.size,
+            task.totalSize,
+            processedSize,
+        )
+    }
+
+    fun sendSendCardUpdate(
+        state: String,
+        taskId: Int,
+        targetName: String,
+        fileName: String,
+        fileCount: Int,
+        totalSize: Long,
+        processedSize: Long,
+    ) {
+        sendBroadcast(
+            Intent(ACTION_SEND_CARD_UPDATE).apply {
+                putExtra(EXTRA_SEND_CARD_STATE, state)
+                putExtra(EXTRA_SEND_CARD_TASK_ID, taskId)
+                putExtra(EXTRA_SEND_CARD_TARGET_NAME, targetName)
+                putExtra(EXTRA_SEND_CARD_FILE_NAME, fileName)
+                putExtra(EXTRA_SEND_CARD_FILE_COUNT, fileCount)
+                putExtra(EXTRA_SEND_CARD_TOTAL_SIZE, totalSize)
+                putExtra(EXTRA_SEND_CARD_PROCESSED_SIZE, processedSize)
+            },
+            INTERNAL_BROADCAST_PERMISSION,
+        )
+    }
+
     companion object {
         private const val ACTION_CANCEL_SENDING = "${BuildConfig.APPLICATION_ID}.CANCEL_SENDING"
+
+        const val ACTION_SEND_CARD_UPDATE = "${BuildConfig.APPLICATION_ID}.SEND_CARD_UPDATE"
+        const val EXTRA_SEND_CARD_STATE = "state"
+        const val EXTRA_SEND_CARD_TASK_ID = "taskId"
+        const val EXTRA_SEND_CARD_TARGET_NAME = "targetName"
+        const val EXTRA_SEND_CARD_FILE_NAME = "fileName"
+        const val EXTRA_SEND_CARD_FILE_COUNT = "fileCount"
+        const val EXTRA_SEND_CARD_TOTAL_SIZE = "totalSize"
+        const val EXTRA_SEND_CARD_PROCESSED_SIZE = "processedSize"
+        const val SEND_CARD_STATE_PREPARING = "preparing"
+        const val SEND_CARD_STATE_CONNECTING = "connecting"
+        const val SEND_CARD_STATE_SENDING = "sending"
+        const val SEND_CARD_STATE_COMPLETED = "completed"
+        const val SEND_CARD_STATE_FAILED = "failed"
 
         fun getIntent(context: Context, task: TaskInfo): Intent {
             return Intent(context, P2pSenderService::class.java).apply {
                 putExtra("task", task)
             }
+        }
+
+        fun getCancelIntent(taskId: Int) = Intent(ACTION_CANCEL_SENDING).apply {
+            putExtra("taskId", taskId)
         }
 
         fun startTaskChecked(context: Context, task: TaskInfo): Boolean {

@@ -37,6 +37,7 @@
     <string name="app_busy_toast">正在进行其他发送/接收任务</string>
     <string name="scanning_desc">正在扫描接收者，请对方开启互传功能。</string>
     <string name="choose_recipient">选择接收者</string>
+    <string name="choose_device">选择设备</string>
     <string name="no_file_shared">分享内容为空或无法读取</string>
     <string name="unknown">未知</string>
     <string name="choose_files">选择文件</string>
@@ -73,5 +74,10 @@
     <string name="receive_card_completed">接收完成</string>
     <string name="receive_card_failed">接收失败</string>
     <string name="receive_card_multiple_files">%d 个文件</string>
+    <string name="send_card_preparing">正在准备发送</string>
+    <string name="send_card_connecting">正在连接接收者</string>
+    <string name="send_card_sending">正在发送文件</string>
+    <string name="send_card_completed">发送完成</string>
+    <string name="send_card_failed">发送失败</string>
     <string name="close">关闭</string>
 </resources>

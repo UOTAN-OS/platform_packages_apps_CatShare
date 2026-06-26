@@ -6,8 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.text.format.Formatter
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -24,20 +26,27 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
@@ -56,6 +65,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -64,8 +74,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import moe.reimu.catshare.models.DiscoveredDevice
+import moe.reimu.catshare.models.FileInfo
+import moe.reimu.catshare.models.TaskInfo
 import moe.reimu.catshare.services.GattServerService
 import moe.reimu.catshare.services.P2pReceiverService
+import moe.reimu.catshare.services.P2pSenderService
 import moe.reimu.catshare.ui.theme.CatShareTheme
 import moe.reimu.catshare.utils.INTERNAL_BROADCAST_PERMISSION
 import moe.reimu.catshare.utils.ServiceState
@@ -78,7 +92,7 @@ import org.uwuaosp.compose.settingslib.SettingsHomepageIcon
 import org.uwuaosp.compose.settingslib.SettingsScaffold
 import org.uwuaosp.compose.settingslib.SettingsToolbarActionButton
 import org.uwuaosp.compose.settingslib.SwitchPreferenceRow
-import java.util.ArrayList
+import kotlin.random.Random
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -152,12 +166,40 @@ class MainActivity : ComponentActivity() {
             return
         }
     }
+
+    fun extractFileInfo(uri: Uri): FileInfo? {
+        val projection = arrayOf(
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.SIZE
+        )
+        return contentResolver.query(uri, projection, null, null)?.use {
+            if (it.moveToFirst()) {
+                val mimeIndex = it.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE)
+                FileInfo(
+                    uri,
+                    it.getString(it.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)),
+                    if (mimeIndex < 0) {
+                        "application/octet-stream"
+                    } else {
+                        it.getString(mimeIndex)
+                    },
+                    it.getLong(it.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)),
+                    null
+                )
+            } else {
+                null
+            }
+        }
+    }
 }
 
 @Composable
 fun MainActivityContent() {
     var checked by remember { mutableStateOf(false) }
     var receiveCardStates by remember { mutableStateOf<List<ReceiveCardState>>(emptyList()) }
+    var sendCardStates by remember { mutableStateOf<List<SendCardState>>(emptyList()) }
+    var pendingSendFiles by remember { mutableStateOf<List<FileInfo>>(emptyList()) }
 
     val context = LocalContext.current
     DisposableEffect(context) {
@@ -196,97 +238,154 @@ fun MainActivityContent() {
             context.unregisterReceiver(receiver)
         }
     }
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != P2pSenderService.ACTION_SEND_CARD_UPDATE) return
+                sendCardStates = SendCardState.updateList(intent, sendCardStates)
+            }
+        }
+
+        context.registerInternalBroadcastReceiver(
+            receiver,
+            IntentFilter(P2pSenderService.ACTION_SEND_CARD_UPDATE),
+        )
+
+        onDispose {
+            context.unregisterReceiver(receiver)
+        }
+    }
 
     val pickFilesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { pickedUris ->
         if (pickedUris.isNotEmpty()) {
-            val intent = Intent(context, ShareActivity::class.java)
-                .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(pickedUris))
-            context.startActivity(intent)
+            val activity = context as? MainActivity
+            val fileInfos = activity?.let { mainActivity ->
+                try {
+                    pickedUris.mapNotNull { mainActivity.extractFileInfo(it) }
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+            }.orEmpty()
+            if (fileInfos.isEmpty()) {
+                Toast.makeText(context, R.string.no_file_shared, Toast.LENGTH_SHORT).show()
+            } else {
+                pendingSendFiles = fileInfos
+            }
         }
     }
 
-    SettingsScaffold(
-        title = stringResource(R.string.app_name),
-        showBackButton = false,
-        actions = {
-            SettingsToolbarActionButton(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = stringResource(R.string.title_activity_settings),
-                onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) },
-            )
-        },
-    ) {
-        AnimatedVisibility(
-            visible = receiveCardStates.isNotEmpty(),
-            enter = fadeIn(tween(220)) + expandVertically(
-                animationSpec = tween(320, easing = FastOutSlowInEasing),
-            ),
-            exit = fadeOut(tween(160)) + shrinkVertically(
-                animationSpec = tween(260, easing = FastOutSlowInEasing),
-            ),
+    Box(modifier = Modifier.fillMaxSize()) {
+        SettingsScaffold(
+            title = stringResource(R.string.app_name),
+            showBackButton = false,
+            actions = {
+                SettingsToolbarActionButton(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = stringResource(R.string.title_activity_settings),
+                    onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) },
+                )
+            },
         ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.animateContentSize(tween(280, easing = FastOutSlowInEasing)),
+            AnimatedVisibility(
+                visible = sendCardStates.isNotEmpty() || receiveCardStates.isNotEmpty(),
+                enter = fadeIn(tween(220)) + expandVertically(
+                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                ),
+                exit = fadeOut(tween(160)) + shrinkVertically(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ),
             ) {
-                receiveCardStates.forEach { state ->
-                    ReceiveTransferCard(
-                        state = state,
-                        onAccept = {
-                            context.sendBroadcast(
-                                P2pReceiverService.getAcceptIntent(state.taskId),
-                                INTERNAL_BROADCAST_PERMISSION,
-                            )
-                        },
-                        onReject = {
-                            context.sendBroadcast(
-                                P2pReceiverService.getDismissIntent(state.taskId),
-                                INTERNAL_BROADCAST_PERMISSION,
-                            )
-                            receiveCardStates = receiveCardStates.withoutTask(state.taskId)
-                        },
-                        onCancel = {
-                            context.sendBroadcast(
-                                P2pReceiverService.getCancelIntent(state.taskId),
-                                INTERNAL_BROADCAST_PERMISSION,
-                            )
-                        },
-                        onClose = {
-                            receiveCardStates = receiveCardStates.withoutTask(state.taskId)
-                        },
-                    )
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.animateContentSize(tween(280, easing = FastOutSlowInEasing)),
+                ) {
+                    sendCardStates.forEach { state ->
+                        SendTransferCard(
+                            state = state,
+                            onCancel = {
+                                context.sendBroadcast(
+                                    P2pSenderService.getCancelIntent(state.taskId),
+                                    INTERNAL_BROADCAST_PERMISSION,
+                                )
+                            },
+                            onClose = {
+                                sendCardStates = sendCardStates.withoutSendTask(state.taskId)
+                            },
+                        )
+                    }
+                    receiveCardStates.forEach { state ->
+                        ReceiveTransferCard(
+                            state = state,
+                            onAccept = {
+                                context.sendBroadcast(
+                                    P2pReceiverService.getAcceptIntent(state.taskId),
+                                    INTERNAL_BROADCAST_PERMISSION,
+                                )
+                            },
+                            onReject = {
+                                context.sendBroadcast(
+                                    P2pReceiverService.getDismissIntent(state.taskId),
+                                    INTERNAL_BROADCAST_PERMISSION,
+                                )
+                                receiveCardStates = receiveCardStates.withoutReceiveTask(state.taskId)
+                            },
+                            onCancel = {
+                                context.sendBroadcast(
+                                    P2pReceiverService.getCancelIntent(state.taskId),
+                                    INTERNAL_BROADCAST_PERMISSION,
+                                )
+                            },
+                            onClose = {
+                                receiveCardStates = receiveCardStates.withoutReceiveTask(state.taskId)
+                            },
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
                 }
-                Spacer(modifier = Modifier.height(2.dp))
             }
+            SettingsCategory(title = stringResource(R.string.catshare_category_transfer))
+            SwitchPreferenceRow(
+                title = stringResource(R.string.discoverable),
+                summary = stringResource(R.string.discoverable_desc),
+                checked = checked,
+                iconContent = {
+                    SettingsHomepageIcon(iconRes = R.drawable.ic_feature_search)
+                },
+                onCheckedChange = {
+                    if (it) {
+                        GattServerService.start(context)
+                    } else {
+                        GattServerService.stop(context)
+                    }
+                },
+                position = PreferencePosition.Top,
+            )
+            PreferenceGroupSpacer()
+            PreferenceRow(
+                title = stringResource(R.string.send),
+                summary = stringResource(R.string.send_desc),
+                iconContent = {
+                    SettingsHomepageIcon(imageVector = Icons.Filled.Share)
+                },
+                onClick = { pickFilesLauncher.launch(arrayOf("*/*")) },
+                position = PreferencePosition.Bottom,
+            )
         }
-        SettingsCategory(title = stringResource(R.string.catshare_category_transfer))
-        SwitchPreferenceRow(
-            title = stringResource(R.string.discoverable),
-            summary = stringResource(R.string.discoverable_desc),
-            checked = checked,
-            iconContent = {
-                SettingsHomepageIcon(iconRes = R.drawable.ic_feature_search)
-            },
-            onCheckedChange = {
-                if (it) {
-                    GattServerService.start(context)
-                } else {
-                    GattServerService.stop(context)
+        DevicePickerSheet(
+            visible = pendingSendFiles.isNotEmpty(),
+            onDismiss = { pendingSendFiles = emptyList() },
+            onDeviceSelected = { device ->
+                val task = TaskInfo(
+                    id = Random.nextInt(),
+                    device = device,
+                    files = pendingSendFiles,
+                )
+                if (P2pSenderService.startTaskChecked(context, task)) {
+                    pendingSendFiles = emptyList()
                 }
             },
-            position = PreferencePosition.Top,
-        )
-        PreferenceGroupSpacer()
-        PreferenceRow(
-            title = stringResource(R.string.send),
-            summary = stringResource(R.string.send_desc),
-            iconContent = {
-                SettingsHomepageIcon(imageVector = Icons.Filled.Share)
-            },
-            onClick = { pickFilesLauncher.launch(arrayOf("*/*")) },
-            position = PreferencePosition.Bottom,
         )
     }
 }
@@ -297,6 +396,199 @@ private enum class ReceiveCardPhase {
     Completed,
     Failed,
 }
+
+@Composable
+private fun DevicePickerSheet(
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    onDeviceSelected: (DiscoveredDevice) -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(180)),
+        exit = fadeOut(tween(160)),
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .clickable(onClick = onDismiss),
+            )
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.82f),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp)
+                        .padding(top = 22.dp)
+                        .padding(WindowInsets.navigationBars.asPaddingValues()),
+                ) {
+                    Text(
+                        text = stringResource(R.string.choose_device),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(modifier = Modifier.height(18.dp))
+                    DevicePickerContent(
+                        onDeviceSelected = onDeviceSelected,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DevicePickerContent(
+    onDeviceSelected: (DiscoveredDevice) -> Unit,
+) {
+    val devices = deviceScanner()
+    if (devices.isEmpty()) {
+        Text(
+            text = stringResource(R.string.scanning_desc),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        return
+    }
+
+    Column {
+        devices.forEach { device ->
+            DevicePickerRow(
+                device = device,
+                onClick = { onDeviceSelected(device) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DevicePickerRow(
+    device: DiscoveredDevice,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.AccountCircle,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(42.dp),
+        )
+        Spacer(modifier = Modifier.width(18.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = if (BuildConfig.DEBUG) {
+                    "${device.name} (${device.id}, ${device.device.address})"
+                } else {
+                    device.name
+                },
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = device.brand ?: stringResource(R.string.unknown),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private enum class SendCardPhase {
+    Preparing,
+    Connecting,
+    Sending,
+    Completed,
+    Failed,
+}
+
+private data class SendCardState(
+    val phase: SendCardPhase,
+    val taskId: Int,
+    val targetName: String,
+    val fileName: String,
+    val fileCount: Int,
+    val totalSize: Long,
+    val processedSize: Long,
+) {
+    val progress: Float?
+        get() = if (totalSize > 0L) {
+            (processedSize.toFloat() / totalSize.toFloat()).coerceIn(0f, 1f)
+        } else {
+            null
+        }
+
+    companion object {
+        fun updateList(
+            intent: Intent,
+            current: List<SendCardState>,
+        ): List<SendCardState> {
+            val taskId = intent.getIntExtra(P2pSenderService.EXTRA_SEND_CARD_TASK_ID, -1)
+            val previous = current.firstOrNull { it.taskId == taskId } ?: current.firstOrNull()
+            val state = fromIntent(intent, previous) ?: return current
+            val next = current.filterNot { it.taskId == state.taskId }
+            return listOf(state) + next
+        }
+
+        private fun fromIntent(intent: Intent, previous: SendCardState?): SendCardState? {
+            return when (
+                intent.getStringExtra(P2pSenderService.EXTRA_SEND_CARD_STATE)
+            ) {
+                P2pSenderService.SEND_CARD_STATE_PREPARING -> SendCardPhase.Preparing
+                P2pSenderService.SEND_CARD_STATE_CONNECTING -> SendCardPhase.Connecting
+                P2pSenderService.SEND_CARD_STATE_SENDING -> SendCardPhase.Sending
+                P2pSenderService.SEND_CARD_STATE_COMPLETED -> SendCardPhase.Completed
+                P2pSenderService.SEND_CARD_STATE_FAILED -> SendCardPhase.Failed
+                else -> return null
+            }.let { phase ->
+                SendCardState(
+                    phase = phase,
+                    taskId = intent.getIntExtra(P2pSenderService.EXTRA_SEND_CARD_TASK_ID, -1),
+                    targetName = intent.getStringExtra(
+                        P2pSenderService.EXTRA_SEND_CARD_TARGET_NAME
+                    ) ?: previous?.targetName.orEmpty(),
+                    fileName = intent.getStringExtra(
+                        P2pSenderService.EXTRA_SEND_CARD_FILE_NAME
+                    ) ?: previous?.fileName.orEmpty(),
+                    fileCount = intent.getIntExtra(
+                        P2pSenderService.EXTRA_SEND_CARD_FILE_COUNT,
+                        previous?.fileCount ?: 0,
+                    ),
+                    totalSize = intent.getLongExtra(
+                        P2pSenderService.EXTRA_SEND_CARD_TOTAL_SIZE,
+                        previous?.totalSize ?: 0L,
+                    ),
+                    processedSize = intent.getLongExtra(
+                        P2pSenderService.EXTRA_SEND_CARD_PROCESSED_SIZE,
+                        previous?.processedSize ?: 0L,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+private fun List<SendCardState>.withoutSendTask(taskId: Int) = filterNot { it.taskId == taskId }
 
 private data class ReceiveCardState(
     val phase: ReceiveCardPhase,
@@ -372,7 +664,164 @@ private data class ReceiveCardState(
 private val ReceiveCardPhase.isTransient: Boolean
     get() = this == ReceiveCardPhase.Asking || this == ReceiveCardPhase.Receiving
 
-private fun List<ReceiveCardState>.withoutTask(taskId: Int) = filterNot { it.taskId == taskId }
+private fun List<ReceiveCardState>.withoutReceiveTask(taskId: Int) = filterNot { it.taskId == taskId }
+
+@Composable
+private fun SendTransferCard(
+    state: SendCardState,
+    onCancel: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(tween(280, easing = FastOutSlowInEasing)),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceBright,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 28.dp, vertical = 26.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SendCardIcon(state.phase)
+                Spacer(modifier = Modifier.width(22.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = when (state.phase) {
+                            SendCardPhase.Preparing -> stringResource(R.string.send_card_preparing)
+                            SendCardPhase.Connecting -> stringResource(R.string.send_card_connecting)
+                            SendCardPhase.Sending -> stringResource(R.string.send_card_sending)
+                            SendCardPhase.Completed -> stringResource(R.string.send_card_completed)
+                            SendCardPhase.Failed -> stringResource(R.string.send_card_failed)
+                        },
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = sendCardSubtitle(state),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            when (state.phase) {
+                SendCardPhase.Preparing,
+                SendCardPhase.Connecting,
+                SendCardPhase.Sending -> SendCardProgress(state, onCancel)
+                SendCardPhase.Completed,
+                SendCardPhase.Failed -> ReceiveCardCloseButton(onClose)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SendCardIcon(phase: SendCardPhase) {
+    val icon = when (phase) {
+        SendCardPhase.Completed -> R.drawable.ic_done
+        SendCardPhase.Failed -> R.drawable.ic_warning
+        else -> R.drawable.ic_upload_file
+    }
+    Box(
+        modifier = Modifier
+            .size(72.dp)
+            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = ImageVector.vectorResource(icon),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.size(34.dp),
+        )
+    }
+}
+
+@Composable
+private fun SendCardProgress(
+    state: SendCardState,
+    onCancel: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val progress = if (state.phase == SendCardPhase.Sending) state.progress else null
+        if (progress == null) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        } else {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = sendCardProgressText(state),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedButton(
+                onClick = onCancel,
+                shape = RoundedCornerShape(22.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary,
+                ),
+            ) {
+                Text(
+                    text = stringResource(android.R.string.cancel),
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun sendCardSubtitle(state: SendCardState): String {
+    val fileName = state.fileName.ifBlank {
+        if (state.fileCount > 1) {
+            stringResource(R.string.receive_card_multiple_files, state.fileCount)
+        } else {
+            stringResource(R.string.unknown)
+        }
+    }
+    return if (state.targetName.isBlank()) {
+        fileName
+    } else {
+        "$fileName - ${state.targetName}"
+    }
+}
+
+@Composable
+private fun sendCardProgressText(state: SendCardState): String {
+    val context = LocalContext.current
+    return if (state.phase == SendCardPhase.Sending && state.totalSize > 0L) {
+        val processed = Formatter.formatShortFileSize(context, state.processedSize)
+        val total = Formatter.formatShortFileSize(context, state.totalSize)
+        val percent = ((state.progress ?: 0f) * 100).toInt()
+        "$processed / $total | $percent%"
+    } else {
+        when (state.phase) {
+            SendCardPhase.Preparing -> stringResource(R.string.preparing)
+            SendCardPhase.Connecting -> stringResource(R.string.noti_connecting)
+            SendCardPhase.Sending -> stringResource(R.string.preparing)
+            SendCardPhase.Completed -> stringResource(R.string.send_card_completed)
+            SendCardPhase.Failed -> stringResource(R.string.send_card_failed)
+        }
+    }
+}
 
 @Composable
 private fun ReceiveTransferCard(
