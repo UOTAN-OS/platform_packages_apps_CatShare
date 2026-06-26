@@ -10,7 +10,7 @@ class AppSettings(private val context: Context) {
     var deviceName: String
         get() = prefs.getString(
             "deviceName",
-            context.getString(R.string.device_name_default_value)
+            getDefaultDeviceName(context)
         )!!
         set(value) {
             prefs.edit { putString("deviceName", value) }
@@ -27,4 +27,18 @@ class AppSettings(private val context: Context) {
         set(value) {
             prefs.edit { putBoolean("autoAccept", value) }
         }
+
+    private fun getDefaultDeviceName(context: Context): String {
+        return getSystemProperty("bluetooth.device.default_name")
+            ?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.device_name_default_value)
+    }
+
+    private fun getSystemProperty(key: String): String? {
+        return runCatching {
+            Class.forName("android.os.SystemProperties")
+                .getMethod("get", String::class.java)
+                .invoke(null, key) as? String
+        }.getOrNull()
+    }
 }
