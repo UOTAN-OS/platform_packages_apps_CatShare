@@ -71,4 +71,9 @@
     <string name="wifi_disabled">WiFi is disabled or unavailable</string>
     <string name="auto_accept_name">Automatic Accept</string>
     <string name="auto_accept_desc">Accept incoming transfer requests without asking first</string>
+    <string name="receive_card_new_file">Received new file</string>
+    <string name="receive_card_receiving">Receiving file</string>
+    <string name="receive_card_completed">Received</string>
+    <string name="receive_card_failed">Couldn\'t receive</string>
+    <string name="receive_card_multiple_files">%d files</string>
 </resources>

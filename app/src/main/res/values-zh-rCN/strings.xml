@@ -68,4 +68,9 @@
     <string name="wifi_disabled">WiFi 已关闭或不可用</string>
     <string name="auto_accept_name">自动接收</string>
     <string name="auto_accept_desc">收到传输请求时不再询问，直接接受</string>
+    <string name="receive_card_new_file">收到新文件</string>
+    <string name="receive_card_receiving">正在接收文件</string>
+    <string name="receive_card_completed">接收完成</string>
+    <string name="receive_card_failed">接收失败</string>
+    <string name="receive_card_multiple_files">%d 个文件</string>
 </resources>

@@ -63,6 +63,7 @@ import moe.reimu.catshare.exceptions.ExceptionWithMessage
 import moe.reimu.catshare.models.P2pInfo
 import moe.reimu.catshare.models.ReceivedFile
 import moe.reimu.catshare.models.WebSocketMessage
+import moe.reimu.catshare.utils.INTERNAL_BROADCAST_PERMISSION
 import moe.reimu.catshare.utils.NotificationUtils
 import moe.reimu.catshare.utils.ProgressCounter
 import moe.reimu.catshare.utils.TAG
@@ -175,18 +176,22 @@ class P2pReceiverService : BaseP2pService() {
                 runReceive(info, localTaskId)
             } catch (e: CancelledByUserException) {
                 Log.i(TAG, "Cancelled by user")
+                sendReceiveCardUpdate(RECEIVE_CARD_STATE_FAILED, localTaskId)
                 notificationManager.notify(
                     Random.nextInt(),
                     createFailedNotification(e)
                 )
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to process task", e)
+                sendReceiveCardUpdate(RECEIVE_CARD_STATE_FAILED, localTaskId)
                 notificationManager.notify(
                     Random.nextInt(),
                     createFailedNotification(e)
                 )
             } finally {
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                delay(1600)
+                sendReceiveCardHidden()
                 MyApplication.getInstance().clearBusy()
             }
         }
@@ -378,6 +383,40 @@ class P2pReceiverService : BaseP2pService() {
         notificationManager.notify(NotificationUtils.RECEIVER_FG_ID, n)
     }
 
+    private fun sendReceiveCardUpdate(
+        state: String,
+        taskId: Int,
+        senderName: String? = null,
+        fileName: String? = null,
+        fileCount: Int = 0,
+        totalSize: Long = 0L,
+        processedSize: Long = 0L,
+        textContent: Boolean = false,
+    ) {
+        sendBroadcast(
+            Intent(ACTION_RECEIVE_CARD_UPDATE).apply {
+                putExtra(EXTRA_RECEIVE_CARD_STATE, state)
+                putExtra(EXTRA_RECEIVE_CARD_TASK_ID, taskId)
+                putExtra(EXTRA_RECEIVE_CARD_SENDER_NAME, senderName)
+                putExtra(EXTRA_RECEIVE_CARD_FILE_NAME, fileName)
+                putExtra(EXTRA_RECEIVE_CARD_FILE_COUNT, fileCount)
+                putExtra(EXTRA_RECEIVE_CARD_TOTAL_SIZE, totalSize)
+                putExtra(EXTRA_RECEIVE_CARD_PROCESSED_SIZE, processedSize)
+                putExtra(EXTRA_RECEIVE_CARD_IS_TEXT, textContent)
+            },
+            INTERNAL_BROADCAST_PERMISSION,
+        )
+    }
+
+    private fun sendReceiveCardHidden() {
+        sendBroadcast(
+            Intent(ACTION_RECEIVE_CARD_UPDATE).apply {
+                putExtra(EXTRA_RECEIVE_CARD_STATE, RECEIVE_CARD_STATE_HIDDEN)
+            },
+            INTERNAL_BROADCAST_PERMISSION,
+        )
+    }
+
     @SuppressLint("MissingPermission")
     private suspend fun runReceive(p2pInfo: P2pInfo, localTaskId: Int) = coroutineScope {
         val client = HttpClient(OkHttp) {
@@ -453,6 +492,15 @@ class P2pReceiverService : BaseP2pService() {
 
                     if (!AppSettings(this@P2pReceiverService).autoAccept) {
                         // Ask user for confirmation
+                        sendReceiveCardUpdate(
+                            RECEIVE_CARD_STATE_ASKING,
+                            localTaskId,
+                            senderName,
+                            fileName,
+                            fileCount,
+                            totalSize,
+                            textContent = textContent != null,
+                        )
                         updateNotification(
                             createAskingNotification(
                                 localTaskId,
@@ -481,10 +529,30 @@ class P2pReceiverService : BaseP2pService() {
                     }
 
                     if (textContent != null) {
+                        sendReceiveCardUpdate(
+                            RECEIVE_CARD_STATE_RECEIVING,
+                            localTaskId,
+                            senderName,
+                            fileName,
+                            fileCount,
+                            totalSize,
+                            totalSize,
+                            textContent = true,
+                        )
                         val cm = getSystemService(ClipboardManager::class.java)
                         cm.setPrimaryClip(ClipData.newPlainText("Shared Text", textContent))
 
                         showTextCopiedToast()
+                        sendReceiveCardUpdate(
+                            RECEIVE_CARD_STATE_COMPLETED,
+                            localTaskId,
+                            senderName,
+                            fileName,
+                            fileCount,
+                            totalSize,
+                            totalSize,
+                            textContent = true,
+                        )
 
                         wsSession.sendStatusIgnoreException(99, taskId, 1, "ok")
                         delay(1000)
@@ -495,6 +563,15 @@ class P2pReceiverService : BaseP2pService() {
                         createProgressNotification(
                             localTaskId, senderName, totalSize, null
                         )
+                    )
+                    sendReceiveCardUpdate(
+                        RECEIVE_CARD_STATE_RECEIVING,
+                        localTaskId,
+                        senderName,
+                        fileName,
+                        fileCount,
+                        totalSize,
+                        0L,
                     )
 
                     val downloadUrl = "https://${hostPort}/download?taskId=${taskId}"
@@ -511,6 +588,15 @@ class P2pReceiverService : BaseP2pService() {
                                     processed
                                 )
                             )
+                            sendReceiveCardUpdate(
+                                RECEIVE_CARD_STATE_RECEIVING,
+                                localTaskId,
+                                senderName,
+                                fileName,
+                                fileCount,
+                                total,
+                                processed,
+                            )
                         }
 
                         ZipInputStream(ist).use { zipStream ->
@@ -519,6 +605,15 @@ class P2pReceiverService : BaseP2pService() {
                     }
 
                     if (files.isNotEmpty()) {
+                        sendReceiveCardUpdate(
+                            RECEIVE_CARD_STATE_COMPLETED,
+                            localTaskId,
+                            senderName,
+                            files.firstOrNull()?.name ?: fileName,
+                            files.size,
+                            totalSize,
+                            totalSize,
+                        )
                         notificationManager.notify(
                             Random.nextInt(), createCompletedNotification(
                                 senderName, files, files.size != fileCount
@@ -735,5 +830,32 @@ class P2pReceiverService : BaseP2pService() {
         private val ACTION_DISMISSED = "${BuildConfig.APPLICATION_ID}.NOTIFICATION_DISMISSED"
         private val ACTION_ACCEPTED = "${BuildConfig.APPLICATION_ID}.NOTIFICATION_ACCEPTED"
         private val ACTION_CANCEL_RECEIVING = "${BuildConfig.APPLICATION_ID}.CANCEL_RECEIVING"
+
+        const val ACTION_RECEIVE_CARD_UPDATE = "${BuildConfig.APPLICATION_ID}.RECEIVE_CARD_UPDATE"
+        const val EXTRA_RECEIVE_CARD_STATE = "state"
+        const val EXTRA_RECEIVE_CARD_TASK_ID = "taskId"
+        const val EXTRA_RECEIVE_CARD_SENDER_NAME = "senderName"
+        const val EXTRA_RECEIVE_CARD_FILE_NAME = "fileName"
+        const val EXTRA_RECEIVE_CARD_FILE_COUNT = "fileCount"
+        const val EXTRA_RECEIVE_CARD_TOTAL_SIZE = "totalSize"
+        const val EXTRA_RECEIVE_CARD_PROCESSED_SIZE = "processedSize"
+        const val EXTRA_RECEIVE_CARD_IS_TEXT = "isText"
+        const val RECEIVE_CARD_STATE_HIDDEN = "hidden"
+        const val RECEIVE_CARD_STATE_ASKING = "asking"
+        const val RECEIVE_CARD_STATE_RECEIVING = "receiving"
+        const val RECEIVE_CARD_STATE_COMPLETED = "completed"
+        const val RECEIVE_CARD_STATE_FAILED = "failed"
+
+        fun getAcceptIntent(taskId: Int) = Intent(ACTION_ACCEPTED).apply {
+            putExtra("taskId", taskId)
+        }
+
+        fun getDismissIntent(taskId: Int) = Intent(ACTION_DISMISSED).apply {
+            putExtra("taskId", taskId)
+        }
+
+        fun getCancelIntent(taskId: Int) = Intent(ACTION_CANCEL_RECEIVING).apply {
+            putExtra("taskId", taskId)
+        }
     }
 }
