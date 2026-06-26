@@ -76,4 +76,5 @@
     <string name="receive_card_completed">Received</string>
     <string name="receive_card_failed">Couldn\'t receive</string>
     <string name="receive_card_multiple_files">%d files</string>
+    <string name="close">Close</string>
 </resources>

@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainActivityContent() {
     var checked by remember { mutableStateOf(false) }
-    var receiveCardState by remember { mutableStateOf<ReceiveCardState?>(null) }
+    var receiveCardStates by remember { mutableStateOf<List<ReceiveCardState>>(emptyList()) }
 
     val context = LocalContext.current
     DisposableEffect(context) {
@@ -183,7 +183,7 @@ fun MainActivityContent() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action != P2pReceiverService.ACTION_RECEIVE_CARD_UPDATE) return
-                receiveCardState = ReceiveCardState.fromIntent(intent, receiveCardState)
+                receiveCardStates = ReceiveCardState.updateList(intent, receiveCardStates)
             }
         }
 
@@ -219,7 +219,7 @@ fun MainActivityContent() {
         },
     ) {
         AnimatedVisibility(
-            visible = receiveCardState != null,
+            visible = receiveCardStates.isNotEmpty(),
             enter = fadeIn(tween(220)) + expandVertically(
                 animationSpec = tween(320, easing = FastOutSlowInEasing),
             ),
@@ -227,29 +227,38 @@ fun MainActivityContent() {
                 animationSpec = tween(260, easing = FastOutSlowInEasing),
             ),
         ) {
-            receiveCardState?.let { state ->
-                ReceiveTransferCard(
-                    state = state,
-                    onAccept = {
-                        context.sendBroadcast(
-                            P2pReceiverService.getAcceptIntent(state.taskId),
-                            INTERNAL_BROADCAST_PERMISSION,
-                        )
-                    },
-                    onReject = {
-                        context.sendBroadcast(
-                            P2pReceiverService.getDismissIntent(state.taskId),
-                            INTERNAL_BROADCAST_PERMISSION,
-                        )
-                    },
-                    onCancel = {
-                        context.sendBroadcast(
-                            P2pReceiverService.getCancelIntent(state.taskId),
-                            INTERNAL_BROADCAST_PERMISSION,
-                        )
-                    },
-                )
-                Spacer(modifier = Modifier.height(14.dp))
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.animateContentSize(tween(280, easing = FastOutSlowInEasing)),
+            ) {
+                receiveCardStates.forEach { state ->
+                    ReceiveTransferCard(
+                        state = state,
+                        onAccept = {
+                            context.sendBroadcast(
+                                P2pReceiverService.getAcceptIntent(state.taskId),
+                                INTERNAL_BROADCAST_PERMISSION,
+                            )
+                        },
+                        onReject = {
+                            context.sendBroadcast(
+                                P2pReceiverService.getDismissIntent(state.taskId),
+                                INTERNAL_BROADCAST_PERMISSION,
+                            )
+                            receiveCardStates = receiveCardStates.withoutTask(state.taskId)
+                        },
+                        onCancel = {
+                            context.sendBroadcast(
+                                P2pReceiverService.getCancelIntent(state.taskId),
+                                INTERNAL_BROADCAST_PERMISSION,
+                            )
+                        },
+                        onClose = {
+                            receiveCardStates = receiveCardStates.withoutTask(state.taskId)
+                        },
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
             }
         }
         SettingsCategory(title = stringResource(R.string.catshare_category_transfer))
@@ -307,7 +316,19 @@ private data class ReceiveCardState(
         }
 
     companion object {
-        fun fromIntent(intent: Intent, previous: ReceiveCardState?): ReceiveCardState? {
+        fun updateList(
+            intent: Intent,
+            current: List<ReceiveCardState>,
+        ): List<ReceiveCardState> {
+            val taskId = intent.getIntExtra(P2pReceiverService.EXTRA_RECEIVE_CARD_TASK_ID, -1)
+            val previous = current.firstOrNull { it.taskId == taskId } ?: current.firstOrNull()
+            val state = fromIntent(intent, previous)
+                ?: return current.filterNot { it.phase.isTransient }
+            val next = current.filterNot { it.taskId == state.taskId }
+            return listOf(state) + next
+        }
+
+        private fun fromIntent(intent: Intent, previous: ReceiveCardState?): ReceiveCardState? {
             return when (
                 intent.getStringExtra(P2pReceiverService.EXTRA_RECEIVE_CARD_STATE)
             ) {
@@ -348,12 +369,18 @@ private data class ReceiveCardState(
     }
 }
 
+private val ReceiveCardPhase.isTransient: Boolean
+    get() = this == ReceiveCardPhase.Asking || this == ReceiveCardPhase.Receiving
+
+private fun List<ReceiveCardState>.withoutTask(taskId: Int) = filterNot { it.taskId == taskId }
+
 @Composable
 private fun ReceiveTransferCard(
     state: ReceiveCardState,
     onAccept: () -> Unit,
     onReject: () -> Unit,
     onCancel: () -> Unit,
+    onClose: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
@@ -400,7 +427,7 @@ private fun ReceiveTransferCard(
                 ReceiveCardPhase.Asking -> ReceiveCardDecisionButtons(onReject, onAccept)
                 ReceiveCardPhase.Receiving -> ReceiveCardProgress(state, onCancel)
                 ReceiveCardPhase.Completed,
-                ReceiveCardPhase.Failed -> Unit
+                ReceiveCardPhase.Failed -> ReceiveCardCloseButton(onClose)
             }
         }
     }
@@ -466,6 +493,31 @@ private fun ReceiveCardDecisionButtons(
         ) {
             Text(
                 text = stringResource(R.string.accept),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReceiveCardCloseButton(onClose: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        OutlinedButton(
+            onClick = onClose,
+            modifier = Modifier
+                .heightIn(min = 52.dp)
+                .width(132.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.primary,
+            ),
+        ) {
+            Text(
+                text = stringResource(R.string.close),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )

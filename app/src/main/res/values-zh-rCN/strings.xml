@@ -73,4 +73,5 @@
     <string name="receive_card_completed">接收完成</string>
     <string name="receive_card_failed">接收失败</string>
     <string name="receive_card_multiple_files">%d 个文件</string>
+    <string name="close">关闭</string>
 </resources>
