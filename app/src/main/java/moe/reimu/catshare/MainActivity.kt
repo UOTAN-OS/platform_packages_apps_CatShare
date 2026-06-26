@@ -26,10 +26,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import moe.reimu.catshare.services.GattServerService
@@ -42,6 +40,7 @@ import org.uwuaosp.compose.settingslib.PreferenceGroupSpacer
 import org.uwuaosp.compose.settingslib.PreferencePosition
 import org.uwuaosp.compose.settingslib.PreferenceRow
 import org.uwuaosp.compose.settingslib.SettingsCategory
+import org.uwuaosp.compose.settingslib.SettingsHomepageIcon
 import org.uwuaosp.compose.settingslib.SettingsScaffold
 import org.uwuaosp.compose.settingslib.SettingsToolbarActionButton
 import org.uwuaosp.compose.settingslib.SwitchPreferenceRow
@@ -184,7 +183,9 @@ fun MainActivityContent() {
             summary = stringResource(R.string.discoverable_desc),
             checked = checked,
             enabled = preferencesEnabled,
-            icon = ImageVector.vectorResource(R.drawable.ic_feature_search),
+            iconContent = {
+                SettingsHomepageIcon(iconRes = R.drawable.ic_feature_search)
+            },
             onCheckedChange = {
                 if (it) {
                     GattServerService.start(context)
@@ -198,7 +199,9 @@ fun MainActivityContent() {
         PreferenceRow(
             title = stringResource(R.string.send),
             summary = stringResource(R.string.send_desc),
-            icon = Icons.Filled.Share,
+            iconContent = {
+                SettingsHomepageIcon(imageVector = Icons.Filled.Share)
+            },
             onClick = { pickFilesLauncher.launch(arrayOf("*/*")) },
             enabled = preferencesEnabled,
             position = PreferencePosition.Bottom,

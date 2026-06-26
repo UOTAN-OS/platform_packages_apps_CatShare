@@ -28,6 +28,7 @@ import org.uwuaosp.compose.settingslib.PreferenceGroupSpacer
 import org.uwuaosp.compose.settingslib.PreferencePosition
 import org.uwuaosp.compose.settingslib.PreferenceRow
 import org.uwuaosp.compose.settingslib.SettingsCategory
+import org.uwuaosp.compose.settingslib.SettingsHomepageIcon
 import org.uwuaosp.compose.settingslib.SettingsScaffold
 import org.uwuaosp.compose.settingslib.SwitchPreferenceRow
 import org.uwuaosp.compose.settingslib.TextInputPreferenceDialog
@@ -86,6 +87,9 @@ fun SettingsActivityContent() {
         PreferenceRow(
             title = stringResource(R.string.device_name),
             summary = deviceNameValue,
+            iconContent = {
+                SettingsHomepageIcon(iconRes = R.drawable.ic_mobile_info)
+            },
             onClick = { showDeviceNameDialog = true },
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -95,6 +99,9 @@ fun SettingsActivityContent() {
             summary = stringResource(R.string.auto_accept_desc),
             checked = autoAcceptValue,
             onCheckedChange = { autoAcceptValue = it },
+            iconContent = {
+                SettingsHomepageIcon(iconRes = R.drawable.ic_folder_check)
+            },
             position = PreferencePosition.Top,
         )
         PreferenceGroupSpacer()
@@ -103,6 +110,9 @@ fun SettingsActivityContent() {
             summary = stringResource(R.string.verbose_desc),
             checked = verboseValue,
             onCheckedChange = { verboseValue = it },
+            iconContent = {
+                SettingsHomepageIcon(iconRes = R.drawable.ic_expansion_panel)
+            },
             position = PreferencePosition.Bottom,
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -110,6 +120,9 @@ fun SettingsActivityContent() {
         PreferenceRow(
             title = stringResource(R.string.capture_logs),
             summary = stringResource(R.string.capture_logs_desc),
+            iconContent = {
+                SettingsHomepageIcon(iconRes = R.drawable.ic_bug_report)
+            },
             onClick = { captureLogs() },
         )
     }
