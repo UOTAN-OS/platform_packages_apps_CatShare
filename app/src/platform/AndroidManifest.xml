@@ -44,6 +44,9 @@
     <uses-permission
         android:name="android.permission.LOCAL_MAC_ADDRESS"
         tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
 
     <permission
         android:name="moe.reimu.catshare.INTERNAL_BROADCASTS"

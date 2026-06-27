@@ -17,5 +17,6 @@
 <permissions>
     <privapp-permissions package="moe.reimu.catshare">
         <permission name="android.permission.LOCAL_MAC_ADDRESS" />
+        <permission name="android.permission.READ_LOGS" />
     </privapp-permissions>
 </permissions>

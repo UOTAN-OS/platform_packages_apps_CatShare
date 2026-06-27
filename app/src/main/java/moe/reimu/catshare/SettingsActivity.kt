@@ -1,5 +1,7 @@
 package moe.reimu.catshare
 
+import android.content.ClipData
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
@@ -123,7 +125,7 @@ fun SettingsActivityContent() {
             iconContent = {
                 SettingsHomepageIcon(iconRes = R.drawable.ic_bug_report)
             },
-            onClick = { captureLogs() },
+            onClick = { activity?.let { captureLogs(it) } },
         )
     }
 
@@ -146,10 +148,9 @@ fun SettingsActivityContent() {
     }
 }
 
-private fun captureLogs() {
+private fun captureLogs(context: Context) {
     Thread {
         try {
-            val context = MyApplication.getInstance()
             val logDir = File(context.cacheDir, "logs")
             logDir.mkdirs()
             val logFile = File(logDir, "logcat.txt")
@@ -167,15 +168,25 @@ private fun captureLogs() {
                 "${BuildConfig.APPLICATION_ID}.fileProvider",
                 logFile
             )
-            val intent = Intent(Intent.ACTION_SEND)
-                .putExtra(Intent.EXTRA_STREAM, uri)
-                .setType("text/plain")
-                .setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = ClipData.newUri(context.contentResolver, logFile.name, uri)
+                type = "text/plain"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(intent, context.getString(R.string.capture_logs))
+            val targets = context.packageManager.queryIntentActivities(intent, 0)
+            targets.forEach { target ->
+                context.grantUriPermission(
+                    target.activityInfo.packageName,
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
             Log.e("LogcatCapture", "Failed to save logs", e)
             Handler(Looper.getMainLooper()).post {
-                val context = MyApplication.getInstance()
                 Toast.makeText(
                     context,
                     context.getString(R.string.log_capture_failed),
