@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -27,6 +29,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,7 +69,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
@@ -599,6 +604,9 @@ private data class ReceiveCardState(
     val totalSize: Long,
     val processedSize: Long,
     val isText: Boolean,
+    val previewText: String?,
+    val previewUri: String?,
+    val previewMimeType: String?,
 ) {
     val progress: Float?
         get() = if (totalSize > 0L) {
@@ -655,6 +663,15 @@ private data class ReceiveCardState(
                         P2pReceiverService.EXTRA_RECEIVE_CARD_IS_TEXT,
                         previous?.isText ?: false,
                     ),
+                    previewText = intent.getStringExtra(
+                        P2pReceiverService.EXTRA_RECEIVE_CARD_PREVIEW_TEXT
+                    ) ?: previous?.previewText,
+                    previewUri = intent.getStringExtra(
+                        P2pReceiverService.EXTRA_RECEIVE_CARD_PREVIEW_URI
+                    ) ?: previous?.previewUri,
+                    previewMimeType = intent.getStringExtra(
+                        P2pReceiverService.EXTRA_RECEIVE_CARD_PREVIEW_MIME_TYPE
+                    ) ?: previous?.previewMimeType,
                 )
             }
         }
@@ -872,6 +889,7 @@ private fun ReceiveTransferCard(
                     )
                 }
             }
+            ReceiveCardPreview(state)
             when (state.phase) {
                 ReceiveCardPhase.Asking -> ReceiveCardDecisionButtons(onReject, onAccept)
                 ReceiveCardPhase.Receiving -> ReceiveCardProgress(state, onCancel)
@@ -880,6 +898,60 @@ private fun ReceiveTransferCard(
             }
         }
     }
+}
+
+@Composable
+private fun ReceiveCardPreview(state: ReceiveCardState) {
+    val previewText = state.previewText
+    if (state.isText && !previewText.isNullOrBlank()) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Text(
+                text = previewText,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            )
+        }
+        return
+    }
+
+    val previewUri = state.previewUri
+    if (!previewUri.isNullOrBlank() && state.previewMimeType?.startsWith("image/") == true) {
+        val context = LocalContext.current
+        val bitmap = remember(previewUri) {
+            loadPreviewBitmap(context, previewUri)
+        }
+        if (bitmap != null) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        }
+    }
+}
+
+private fun loadPreviewBitmap(context: Context, uriString: String): Bitmap? {
+    return runCatching {
+        context.contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
+            BitmapFactory.decodeStream(input)
+        }
+    }.getOrNull()
 }
 
 @Composable

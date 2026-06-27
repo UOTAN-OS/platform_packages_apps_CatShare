@@ -392,6 +392,9 @@ class P2pReceiverService : BaseP2pService() {
         totalSize: Long = 0L,
         processedSize: Long = 0L,
         textContent: Boolean = false,
+        previewText: String? = null,
+        previewUri: String? = null,
+        previewMimeType: String? = null,
     ) {
         sendBroadcast(
             Intent(ACTION_RECEIVE_CARD_UPDATE).apply {
@@ -403,6 +406,9 @@ class P2pReceiverService : BaseP2pService() {
                 putExtra(EXTRA_RECEIVE_CARD_TOTAL_SIZE, totalSize)
                 putExtra(EXTRA_RECEIVE_CARD_PROCESSED_SIZE, processedSize)
                 putExtra(EXTRA_RECEIVE_CARD_IS_TEXT, textContent)
+                putExtra(EXTRA_RECEIVE_CARD_PREVIEW_TEXT, previewText)
+                putExtra(EXTRA_RECEIVE_CARD_PREVIEW_URI, previewUri)
+                putExtra(EXTRA_RECEIVE_CARD_PREVIEW_MIME_TYPE, previewMimeType)
             },
             INTERNAL_BROADCAST_PERMISSION,
         )
@@ -500,6 +506,7 @@ class P2pReceiverService : BaseP2pService() {
                             fileCount,
                             totalSize,
                             textContent = textContent != null,
+                            previewText = textContent,
                         )
                         updateNotification(
                             createAskingNotification(
@@ -538,6 +545,7 @@ class P2pReceiverService : BaseP2pService() {
                             totalSize,
                             totalSize,
                             textContent = true,
+                            previewText = textContent,
                         )
                         val cm = getSystemService(ClipboardManager::class.java)
                         cm.setPrimaryClip(ClipData.newPlainText("Shared Text", textContent))
@@ -552,6 +560,7 @@ class P2pReceiverService : BaseP2pService() {
                             totalSize,
                             totalSize,
                             textContent = true,
+                            previewText = textContent,
                         )
 
                         wsSession.sendStatusIgnoreException(99, taskId, 1, "ok")
@@ -605,6 +614,8 @@ class P2pReceiverService : BaseP2pService() {
                     }
 
                     if (files.isNotEmpty()) {
+                        val previewImage = files.singleOrNull()
+                            ?.takeIf { it.mimeType.startsWith("image/") }
                         sendReceiveCardUpdate(
                             RECEIVE_CARD_STATE_COMPLETED,
                             localTaskId,
@@ -613,6 +624,8 @@ class P2pReceiverService : BaseP2pService() {
                             files.size,
                             totalSize,
                             totalSize,
+                            previewUri = previewImage?.uri?.toString(),
+                            previewMimeType = previewImage?.mimeType,
                         )
                         notificationManager.notify(
                             Random.nextInt(), createCompletedNotification(
@@ -840,6 +853,9 @@ class P2pReceiverService : BaseP2pService() {
         const val EXTRA_RECEIVE_CARD_TOTAL_SIZE = "totalSize"
         const val EXTRA_RECEIVE_CARD_PROCESSED_SIZE = "processedSize"
         const val EXTRA_RECEIVE_CARD_IS_TEXT = "isText"
+        const val EXTRA_RECEIVE_CARD_PREVIEW_TEXT = "previewText"
+        const val EXTRA_RECEIVE_CARD_PREVIEW_URI = "previewUri"
+        const val EXTRA_RECEIVE_CARD_PREVIEW_MIME_TYPE = "previewMimeType"
         const val RECEIVE_CARD_STATE_HIDDEN = "hidden"
         const val RECEIVE_CARD_STATE_ASKING = "asking"
         const val RECEIVE_CARD_STATE_RECEIVING = "receiving"
