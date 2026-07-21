@@ -4,6 +4,8 @@
 /.idea
 .DS_Store
 /build
+/app/build
+/gradle/uwu-compose/build
 /captures
 .externalNativeBuild
 .cxx
