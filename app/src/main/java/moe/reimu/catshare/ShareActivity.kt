@@ -306,8 +306,8 @@ fun deviceScanner(): List<DiscoveredDevice> {
 
         var startedScanner: BluetoothLeScanner? = null
 
-        if (adapter != null) {
-            val scanner = adapter.bluetoothLeScanner
+        val scanner = adapter?.bluetoothLeScanner
+        if (scanner != null) {
             val filters = listOf(
                 ScanFilter.Builder().setServiceUuid(ParcelUuid(BleUtils.ADV_SERVICE_UUID)).build()
             )

@@ -134,3 +134,7 @@
 -dontwarn io.netty.pkitesting.CertificateBuilder$Algorithm
 -dontwarn io.netty.pkitesting.CertificateBuilder
 -dontwarn io.netty.pkitesting.X509Bundle
+-dontwarn kotlinx.coroutines.slf4j.MDCContext
+-dontwarn kotlinx.coroutines.slf4j.MDCContext$Key
+-dontwarn org.apache.commons.logging.Log
+-dontwarn org.apache.commons.logging.LogFactory
