@@ -1,5 +1,12 @@
 # CatShare
 
+
+## UotanOS 集成
+
+- 保留 CatShare 上游说明、uwuAOSP 原有集成记录、`uwuComposeSettingsLib` 与 `org.uwuaosp.compose` 技术标识。
+- UotanOS 仅调整用户可见的平台品牌，不改写原作者和 uwuAOSP 项目说明。
+- UotanOS 集成问题请在 [CatShare 仓库 Issues](https://github.com/UOTAN-OS/platform_packages_apps_CatShare/issues) 中提交。
+
 ## uwuAOSP 对 CatShare 的变更
 - 迁移首页和设置页到 `uwuComposeSettingsLib`/SettingsLib 风格，补充设置入口图标、偏好项图标、Google Sans 字体与更接近系统设置的输入弹窗。
 - 支持在 AOSP/平台应用环境中构建，加入 Soong 配置、平台 manifest、privapp 权限白名单，并将第三方依赖以 `external/` 预置库形式纳入工程。

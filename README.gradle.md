@@ -1,6 +1,6 @@
 # Gradle development build
 
-The Soong build remains the source of truth for uwuAOSP system images. The Gradle build reuses
+The Soong build remains the source of truth for UotanOS system images. The Gradle build reuses
 the production CatShare sources and includes `uwu-sdk/uwuCompose` as the `:uwu-compose` source
 module for Android Studio indexing and Compose previews.
 
